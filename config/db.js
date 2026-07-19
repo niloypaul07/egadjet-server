@@ -9,8 +9,15 @@ if (dns.getServers().includes('127.0.0.1') || dns.getServers().includes('::1')) 
 }
 
 let mongod = null;
+let cachedConnection = null;
 
 const connectDB = async () => {
+  // Return cached connection if already connected (for serverless)
+  if (cachedConnection && mongoose.connection.readyState === 1) {
+    console.log('Using cached MongoDB connection');
+    return cachedConnection;
+  }
+
   let uri = process.env.MONGODB_URI;
   const isLocal = !uri || uri.includes('127.0.0.1') || uri.includes('localhost');
 
@@ -43,8 +50,9 @@ const connectDB = async () => {
     }
   }
 
-  await mongoose.connect(uri);
+  cachedConnection = await mongoose.connect(uri);
   console.log('MongoDB connected successfully');
+  return cachedConnection;
 };
 
 // -----------------------------------------------------------------------

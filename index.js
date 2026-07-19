@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
+const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 
 const app = express();
@@ -28,38 +29,52 @@ app.use(
 app.use(express.json());
 app.use(cookieParser());
 
+// Middleware to ensure DB connection before handling routes
+app.use('/api', async (req, res, next) => {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      await connectDB();
+    }
+    next();
+  } catch (error) {
+    console.error('Database connection error:', error);
+    res.status(500).json({ success: false, message: 'Database connection failed' });
+  }
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ success: true, message: 'eGadjet API is running' });
 });
 
-const PORT = process.env.PORT || 5000;
-const server = app.listen(PORT, () => {
-  console.log(`eGadjet server running on port ${PORT}`);
+// Mount routes immediately (before server starts)
+const authRoutes = require('./routes/auth');
+const gadgetRoutes = require('./routes/gadgets');
+const reviewRoutes = require('./routes/reviews');
+const aiRoutes = require('./routes/ai');
+const orderRoutes = require('./routes/orders');
+
+app.use('/api/auth', authRoutes);
+app.use('/api/gadgets', gadgetRoutes);
+app.use('/api/reviews', reviewRoutes);
+app.use('/api/ai', aiRoutes);
+app.use('/api/orders', orderRoutes);
+
+app.use((_req, res) => {
+  res.status(404).json({ success: false, message: 'Route not found' });
 });
 
-// Connect DB and set up routes
-(async () => {
-  await connectDB();
+app.use((err, _req, res, _next) => {
+  console.error(err);
+  res.status(500).json({ success: false, message: 'Internal server error' });
+});
 
-  if (global.dbMockMode) {
-    // In mock mode, all routes are served by the mock router from db.js
-    const { getMockRouter } = require('./config/db');
-    app.use('/api', getMockRouter());
-    console.log('Mock API router mounted on /api');
-  } else {
-    // Real DB: mount Mongoose-based route handlers
-    const authRoutes = require('./routes/auth');
-    const gadgetRoutes = require('./routes/gadgets');
-    const reviewRoutes = require('./routes/reviews');
-    const aiRoutes = require('./routes/ai');
-    const orderRoutes = require('./routes/orders');
-
-    app.use('/api/auth', authRoutes);
-    app.use('/api/gadgets', gadgetRoutes);
-    app.use('/api/reviews', reviewRoutes);
-    app.use('/api/ai', aiRoutes);
-    app.use('/api/orders', orderRoutes);
-
+// For local development
+if (require.main === module) {
+  const PORT = process.env.PORT || 5000;
+  
+  (async () => {
+    await connectDB();
+    
     // Auto-seed if empty
     const Gadget = require('./models/Gadget');
     const { seedData } = require('./utils/seed');
@@ -68,17 +83,15 @@ const server = app.listen(PORT, () => {
       console.log('Database is empty. Auto-seeding default data...');
       await seedData();
     }
-  }
-
-  app.use((_req, res) => {
-    res.status(404).json({ success: false, message: 'Route not found' });
+    
+    app.listen(PORT, () => {
+      console.log(`eGadjet server running on port ${PORT}`);
+    });
+  })().catch((err) => {
+    console.error('Startup failed:', err.message);
+    process.exit(1);
   });
+}
 
-  app.use((err, _req, res, _next) => {
-    console.error(err);
-    res.status(500).json({ success: false, message: 'Internal server error' });
-  });
-})().catch((err) => {
-  console.error('Startup failed:', err.message);
-  process.exit(1);
-});
+// Export for Vercel
+module.exports = app;
